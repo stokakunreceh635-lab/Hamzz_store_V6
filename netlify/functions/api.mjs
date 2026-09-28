@@ -23,7 +23,7 @@ function requireUser(event,role){const u=auth(event);if(!u)return [null,fail('Si
 const cleanUser=u=>u&&{id:u.id,name:u.name,email:u.email,role:u.role,created:u.created};
 function publicState(d,u){const admin=u?.role==='admin';return {products:d.products,payments:d.payments,vouchers:d.vouchers.filter(v=>v.active!==false && (!v.expires||v.expires>=Date.now())),banners:d.banners.filter(b=>b.active!==false),flashSales:d.flashSales.filter(f=>f.active!==false && (!f.ends||f.ends>Date.now())),info:d.info,orders:admin?d.orders:d.orders.filter(o=>o.userId===u?.id),users:admin?d.users.map(cleanUser):[],chats:admin?d.chats:d.chats.filter(c=>c.userId===u?.id),revisions:admin?d.revisions:d.revisions.filter(r=>r.userId===u?.id),ratings:d.ratings,session:u?cleanUser(d.users.find(x=>x.id===u.id)||u):null}}
 
-export default async function handler(event){
+async function legacyHandler(event){
  try{
   const input=parse(event); const action=input.action; const d=await readDB(); const u=auth(event);
   if(event.httpMethod==='GET' && input.action==='state'){return ok(publicState(d,u))}
@@ -75,4 +75,50 @@ export default async function handler(event){
   if(action==='rating'){const o=d.orders.find(x=>x.id===input.orderId);if(!o||o.userId!==user.id)return fail('Pesanan tidak ditemukan.',404);if(o.status!=='Selesai')return fail('Rating tersedia setelah pesanan selesai.');const stars=Math.max(1,Math.min(5,Number(input.stars)||0));const existing=d.ratings.find(x=>x.orderId===o.id);const r=existing||{id:id(),orderId:o.id,userId:user.id,created:now()};r.stars=stars;r.comment=String(input.comment||'');r.updated=now();if(!existing)d.ratings.unshift(r);await saveDB(d);return ok({rating:r})}
   return fail('Aksi tidak dikenal.');
  }catch(e){console.error(e);return fail('Server HAMZZ mengalami kesalahan.',500)}
+}
+
+// Adapter untuk Netlify Functions modern (Request -> Response).
+export default async function handler(req, context) {
+  const url = new URL(req.url);
+  let body = '';
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    body = await req.text();
+  }
+
+  const headers = {};
+  req.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
+
+  const event = {
+    httpMethod: req.method,
+    headers,
+    queryStringParameters: Object.fromEntries(url.searchParams.entries()),
+    body
+  };
+
+  const result = await legacyHandler(event);
+
+  if (!result || typeof result !== 'object') {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: 'Server HAMZZ tidak mengembalikan respons yang valid.'
+      }),
+      {
+        status: 500,
+        headers: {
+          'content-type': 'application/json; charset=utf-8'
+        }
+      }
+    );
+  }
+
+  return new Response(result.body ?? '', {
+    status: Number(result.statusCode) || 200,
+    headers: result.headers || {
+      'content-type': 'application/json; charset=utf-8'
+    }
+  });
 }
