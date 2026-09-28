@@ -1,0 +1,9 @@
+{
+  "name": "hamzz-v6-online",
+  "version": "6.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "11.1.1"
+  }
+}
